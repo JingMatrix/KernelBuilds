@@ -1,0 +1,12 @@
+[submodule "toolchains/avb"]
+	path = toolchains/avb
+	url = https://android.googlesource.com/platform/external/avb
+[submodule "toolchains/AIK_ARM"]
+	path = toolchains/AIK_ARM
+	url = https://github.com/sreejith7676/AIK_ARM.git
+[submodule "toolchains/vbmeta-action-patcher"]
+	path = toolchains/vbmeta-action-patcher
+	url = https://github.com/cd-Crypton/vbmeta-action-patcher
+[submodule "sm7325"]
+	path = sm7325
+	url = https://github.com/JingMatrix/kernel_samsung_ascendia_sm7325.git
