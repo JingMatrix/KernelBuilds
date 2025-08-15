@@ -94,7 +94,26 @@ firmware/
     git submodule update --init --recursive
     ```
 
-3.  **Place Kernel Source:** Make sure your kernel source code is located in a directory named `sm7325` at the same level as the `kernel-build` directory.
+3.  **Prepare Kernel Source (`sm7325`)**:
+    *   First, ensure your kernel source code is located in a directory named `sm7325` at the same level as the `kernel-build` directory.
+    *   **Important: Select the Correct Kernel Source Branch.** The kernel source has different branches for different types of Android ROMs. The build script will check the branch and fail if it's not a valid one.
+        *   For Samsung's stock **OneUI** ROM, use the `oneui-ksu` branch.
+        *   For **AOSP-based custom ROMs**, use the `aosp-ksu` branch.
+
+        Navigate to the kernel source directory and check out the correct branch **before** building:
+        ```bash
+        # Navigate to the kernel source
+        cd ../sm7325
+
+        # Example for building for OneUI:
+        git checkout oneui-ksu
+
+        # Example for building for AOSP ROMs:
+        # git checkout aosp-ksu
+
+        # Go back to the build script directory
+        cd ../kernel-build
+        ```
 
 4.  **Populate Firmware:** Create the `firmware` directory and populate it with variant subdirectories and their corresponding stock images as explained above.
 
