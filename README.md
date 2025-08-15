@@ -165,3 +165,29 @@ Navigate to the output directory containing the compiled files for the variant y
     ```
 
 After the flash is complete, your device should reboot automatically with the new custom kernel.
+
+### Installing Kernel Modules (The Systemless Way)
+
+Instead of permanently writing to your device's partitions, the kernel modules are now packaged as a separate, systemless Magisk/KernelSU module. This is the modern, recommended approach as it is significantly safer and more flexible.
+
+**Key Advantages:**
+
+*   **Systemless:** Your `/vendor` partition is never modified directly. The modules are loaded as an overlay during boot.
+*   **Safe & Easy:** You can easily disable or uninstall the modules from the Magisk/KernelSU app without needing to re-flash your stock firmware.
+*   **Smart Fixes:** The module is intelligent. For example, it automatically detects if you are on an A52s and applies a necessary camera fix systemlessly. This fix is skipped on other devices.
+
+**Installation Steps:**
+
+1.  **Flash the Kernel First:** Ensure you have already flashed the main kernel images (`boot.img`, `vbmeta.img`, etc.) using the Heimdall method described in the previous section. Your device should be booted into Android.
+
+2.  **Locate the Module ZIP:** After running the `./pack_modules.sh` script in the `kernel-build` directory, you will find a ZIP file named something like `sm7325-klm-1.1-20250815.zip`.
+
+3.  **Transfer to Your Phone:** Copy this ZIP file to your phone's internal storage or SD card.
+
+4.  **Install via App:**
+    *   Open the **Magisk** or **KernelSU** application on your phone.
+    *   Navigate to the **Modules** section.
+    *   Tap the **Install from storage** button.
+    *   Find and select the module ZIP file you just copied.
+
+5.  **Reboot:** Once the in-app installation is complete, reboot your device. The new kernel modules and any applicable fixes will now be active.

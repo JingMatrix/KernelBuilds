@@ -2,3 +2,4 @@ toolchains/clang
 clang.tar.gz
 firmware
 builds
+sm7325-*
