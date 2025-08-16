@@ -1,193 +1,133 @@
 # Custom Kernel Build System
 
-This repository contains a build script for a custom kernel, specifically tailored for the Samsung Galaxy A52s (sm7325). This system is designed to automate the entire process from compilation to packaging, making kernel development and testing streamlined and repeatable.
-
-The script automates dependency checks, toolchain setup, kernel compilation, and the patching of stock firmware images to produce ready-to-flash binaries.
+This repository contains a comprehensive build system for a custom kernel, specifically tailored for the Samsung Galaxy A52s (sm7325). It is designed to automate the entire process from compilation to packaging, producing ready-to-flash binaries and a companion helper module for a clean, systemless installation.
 
 ### Credits
 
 *   **Original Script:** BlackMesa123 @2023
 *   **Adaptation & Modification:** RisenID @2024
-*   **Architectural Improvements:** JingMatrix @2025
+*   **Architectural Improvements & vbmeta Spoofing:** JingMatrix @2025
+
+## Key Features
+
+*   **Automated Environment:** Checks for dependencies and sets up the Clang toolchain automatically.
+*   **Multi-Variant Support:** Dynamically builds for different device regions (e.g., `a52sxqxx`, `a52sxqks`) based on the contents of the `firmware` directory.
+*   **Advanced `vbmeta` Generation:** Rebuilds `vbmeta.img` to be internally consistent with the new kernel hashes, ensuring bootloader compatibility on unlocked devices.
+*   **Systemless Helper Module:** The `pack_modules.sh` script packages kernel modules (`.ko` files) and runtime scripts into a flashable Magisk/KernelSU module for a safe, systemless installation.
 
 ## Prerequisites
 
-Before running the build script, you must have several essential tools installed on your system (preferably a Debian-based Linux distribution like Ubuntu).
+Before building, you must install several essential tools on your system (preferably a Debian-based Linux distribution).
 
-You can install them by running:
 ```bash
 sudo apt update
-sudo apt install git wget tar make ccache python3 build-essential
+sudo apt install git wget tar make ccache python3 build-essential openssl
 ```
 
 ## Directory Structure
 
-The project relies on a specific directory layout. Please ensure your project is structured as follows:
+The project relies on a specific directory layout.
 
 ```
-.
-├── kernel-build/        (This repository)
-│   ├── build.sh         (The main build script)
-│   ├── toolchains/      (Directory for local build tools)
-│   │   ├── AIK_ARM/
-│   │   ├── avb/
-│   │   └── vbmeta-action-patcher/
-│   └── README.md
+kernel-build/            (This repository, the project root)
+├── build.sh             (Builds the kernel images)
+├── pack_modules.sh      (Builds the helper module)
+├── toolchains/          (Directory for local build tools)
+│   ├── AIK_ARM/
+│   └── avb/
 ├── sm7325/              (Your kernel source code goes here)
-├── firmware/            (Stock firmware images go here, see below)
-└── builds/              (Output directory for compiled files)
+├── firmware/            (Stock firmware images go here)
+└── builds/              (Output directory for compiled images)
 ```
 
-*   **`kernel-build/`**: The root of this build system. The `build.sh` script should be run from here.
-*   **`toolchains/`**: Contains necessary binaries like Magiskboot, AVBtool, etc. If these are managed as Git submodules, initialize them with `git submodule update --init --recursive`.
-*   **`sm7325/`**: The directory where your kernel source code must be located.
-*   **`firmware/`**: **Crucial.** This directory holds the stock firmware images that the script will use as a base. It must be created and populated by you.
-*   **`builds/`**: This directory is created automatically by the script and will contain all the final, flashable image files.
+## The `firmware` Directory
 
-## Understanding the `firmware` Directory
+The `firmware` directory is the foundation of the build process. The script dynamically detects which device variants to build based on the subdirectories present here.
 
-The `firmware` directory is the foundation of the build process. Instead of hardcoding device variants, the script now dynamically detects which variants to build based on the subdirectories present here.
-
-**You must create this directory and populate it yourself.** The script will **not** download these files for you. You can extract these from official Samsung firmware packages for your device.
-
-### How it Works
-
-1.  The build script scans the `firmware/` directory for subdirectories.
-2.  Each subdirectory name corresponds to a specific device variant (e.g., `a52sxqxx`, `a52sxqks`).
-3.  The script will attempt to build the kernel **only for the variants found as subdirectories**.
-4.  For a variant to be built, its corresponding subdirectory must contain the following four stock image files:
-    *   `boot.img`
-    *   `vendor_boot.img`
-    *   `dtbo.img`
-    *   `vbmeta.img`
-
-If any of these files are missing for a specific variant, the script will print a warning and skip building for that variant.
+**You must create and populate this directory yourself.** You can extract the required images from official Samsung firmware packages. For a variant to be built, its subdirectory must contain `boot.img`, `vendor_boot.img`, `dtbo.img`, and `vbmeta.img`.
 
 ### Example Structure
-
-To build for the European (`a52sxqxx`) and Korean (`a52sxqks`) variants, your `firmware` directory should look like this:
-
+To build for the European (`a52sxqxx`) and Korean (`a52sxqks`) variants:
 ```
 firmware/
 ├── a52sxqxx/
-│   ├── boot.img
-│   ├── dtbo.img
-│   ├── vbmeta.img
-│   └── vendor_boot.img
+│   ├── boot.img, dtbo.img, vbmeta.img, vendor_boot.img
 └── a52sxqks/
-    ├── boot.img
-    ├── dtbo.img
-    ├── vbmeta.img
-    └── vendor_boot.img
+    ├── boot.img, dtbo.img, vbmeta.img, vendor_boot.img
 ```
 
-## How to Use
+## The Build Process: A Two-Step Guide
 
-1.  **Clone this repository:**
-    ```bash
-    git clone <repository_url> kernel-build
-    cd kernel-build
-    ```
+### Step 1: Prepare the Environment
+1.  **Clone this repository (`kernel-build`) and navigate into it.**
+2.  **Initialize Toolchains:** If using Git submodules, run `git submodule update --init --recursive`.
+3.  **Place Kernel Source:** Place your kernel source code inside the `kernel-build` directory and name it `sm7325`.
+4.  **Select Kernel Branch:** The build script checks the current branch of your kernel source.
+    *   For Samsung's stock **OneUI** ROM: `git checkout oneui-ksu`
+    *   For **AOSP-based custom ROMs**: `git checkout aosp-ksu`
+5.  **Populate Firmware:** Create and fill the `firmware` directory as explained above.
 
-2.  **Initialize Toolchains:** If the `toolchains` directory uses Git submodules, initialize them:
-    ```bash
-    git submodule update --init --recursive
-    ```
+### Step 2: Run the Build Scripts
 
-3.  **Prepare Kernel Source (`sm7325`)**:
-    *   First, ensure your kernel source code is located in a directory named `sm7325` at the same level as the `kernel-build` directory.
-    *   **Important: Select the Correct Kernel Source Branch.** The kernel source has different branches for different types of Android ROMs. The build script will check the branch and fail if it's not a valid one.
-        *   For Samsung's stock **OneUI** ROM, use the `oneui-ksu` branch.
-        *   For **AOSP-based custom ROMs**, use the `aosp-ksu` branch.
+First, build the main kernel images. Then, package the helper module.
 
-        Navigate to the kernel source directory and check out the correct branch **before** building:
-        ```bash
-        # Navigate to the kernel source
-        cd ../sm7325
-
-        # Example for building for OneUI:
-        git checkout oneui-ksu
-
-        # Example for building for AOSP ROMs:
-        # git checkout aosp-ksu
-
-        # Go back to the build script directory
-        cd ../kernel-build
-        ```
-
-4.  **Populate Firmware:** Create the `firmware` directory and populate it with variant subdirectories and their corresponding stock images as explained above.
-
-5.  **Run the Build Script:** Execute the main script.
+1.  **Build Kernel Images:**
     ```bash
     ./build.sh
     ```
-    *   For a full clean build, use the `--clean` or `-c` flag:
-        ```bash
-        ./build.sh --clean
-        ```
+    This compiles the kernel and creates the modified `boot.img`, `dtbo.img`, `vendor_boot.img`, and the special `vbmeta.img` inside the `builds/` directory.
 
-6.  **Find Your Files:** After a successful run, the script will create the `builds` directory. Inside, you will find a separate folder for each variant you built.
-
-## Flashing Instructions
-
-**Disclaimer:** Flashing custom binaries to your device carries inherent risks, including the potential to brick your device. Proceed with caution and at your own risk.
-
-### 1. Install Heimdall
-
-Heimdall is an open-source, cross-platform utility for flashing firmware onto Samsung devices. It is recommended to build the latest version from source to ensure device compatibility.
-
-*   **Source Code:** [https://git.sr.ht/~grimler/Heimdall](https://git.sr.ht/~grimler/Heimdall)
-*   Follow the build instructions in the `README.md` of the Heimdall repository. This typically involves installing dependencies like `build-essential`, `cmake`, `libusb-1.0-0-dev`, and `zlib1g-dev`.
-
-### 2. Reboot to Download Mode
-
-For Heimdall to recognize your device, it must be in Download Mode.
-
-*   Ensure your phone is connected to your computer and USB Debugging is enabled and authorized.
-*   Open a terminal and run the following command:
+2.  **Build the Helper Module:**
     ```bash
-    adb reboot download
+    ./pack_modules.sh
     ```
-*   Your device will reboot and display a screen with a warning about custom OS installation. Follow the on-screen instructions to enter Download Mode.
+    This script packages the compiled kernel modules (`.ko` files) and runtime scripts into a flashable ZIP file. **This ZIP file will be created in the main `kernel-build` directory.**
 
-### 3. Flash the Images
+## Flashing & Installation
 
-Navigate to the output directory containing the compiled files for the variant you wish to flash.
-
-*   For example, if you built for the `a52sxqxx` variant:
+### Step 1: Flash Kernel Images via Heimdall
+1.  **Install Heimdall:** It is recommended to build the latest version from this fork: [https://git.sr.ht/~grimler/Heimdall](https://git.sr.ht/~grimler/Heimdall).
+2.  **Reboot to Download Mode:** With your phone connected, run `adb reboot download`.
+3.  **Flash:** Navigate to the output directory for your variant (e.g., `cd builds/a52sxqxx/`) and run the flash command:
     ```bash
-    cd ../builds/a52sxqxx/
+    heimdall flash --VBMETA vbmeta.img --BOOT boot.img --DTBO dtbo.img --VENDOR_BOOT vendor_boot.img
     ```
+    *Note: `sudo` may be required if you haven't set up udev rules for your user to access the USB device.*
 
-*   Once in the correct directory, run the following `heimdall` command to flash all the required partitions at once. The patched `vbmeta.img` will disable verification, allowing the custom kernel to boot.
-    ```bash
-    sudo heimdall flash --VBMETA vbmeta.img --BOOT boot.img --DTBO dtbo.img --VENDOR_BOOT vendor_boot.img
-    ```
+### Step 2: Install the Helper Module
+After your device reboots into Android, you are advised to install the helper module.
 
-After the flash is complete, your device should reboot automatically with the new custom kernel.
+1.  **Transfer the ZIP:** Locate the module ZIP file created by `pack_modules.sh` in the main `kernel-build` directory and copy it to your phone.
+2.  **Install via App:**
+    *   Open the **Magisk** or **KernelSU** app.
+    *   Go to the **Modules** section.
+    *   Tap **Install from storage** and select the ZIP file.
+3.  **Reboot:** Reboot your device when prompted.
 
-### Installing Kernel Modules (The Systemless Way)
+## Technical Details: The Two-Part Integrity Spoof
 
-Instead of permanently writing to your device's partitions, the kernel modules are now packaged as a separate, systemless Magisk/KernelSU module. This is the modern, recommended approach as it is significantly safer and more flexible.
+This system uses a two-part approach to create a bootable kernel that can serve as a base for passing integrity checks.
 
-**Key Advantages:**
+### Part 1: The `vbmeta.img` Foundation
+The `build.sh` script creates a `vbmeta.img` with two key characteristics:
+*   **It is bootable:** It is created with **`--flags 2`**, which sets the `VERIFICATION_DISABLED` flag. This instructs the bootloader to skip the main signature check, allowing the device to boot without a "public key mismatch" error.
+*   **It is internally consistent:** It contains the correct SHA hashes of our custom-built `boot.img`, `dtbo.img`, and `vendor_boot.img`.
 
-*   **Systemless:** Your `/vendor` partition is never modified directly. The modules are loaded as an overlay during boot.
-*   **Safe & Easy:** You can easily disable or uninstall the modules from the Magisk/KernelSU app without needing to re-flash your stock firmware.
-*   **Smart Fixes:** The module is intelligent. For example, it automatically detects if you are on an A52s and applies a necessary camera fix systemlessly. This fix is skipped on other devices.
+However, using `--flags 2` creates a new problem: the bootloader sees verification is disabled and, as a result, **does not set the `ro.boot.vbmeta.*` properties** at all. This absence is itself a clear sign of tampering. This is where the helper module is essential.
 
-**Installation Steps:**
+### Part 2: The Helper Module's Runtime Spoof
+The helper module serves two critical functions:
 
-1.  **Flash the Kernel First:** Ensure you have already flashed the main kernel images (`boot.img`, `vbmeta.img`, etc.) using the Heimdall method described in the previous section. Your device should be booted into Android.
+1.  **Systemless Module Loading:** Its primary job is to package all the necessary kernel modules (`.ko` driver files) into a safe, systemless module. This means your `/vendor` partition is never modified.
+2.  **Runtime Property Injection:** The `service.sh` script within the helper module is specifically designed to fix the problem created by the bootable `vbmeta`. It runs at boot and uses `resetprop` to **add the missing `ro.boot.vbmeta.*` properties back into the system**. By providing these properties, it spoofs a clean, stock boot environment and provides the necessary foundation for passing integrity checks.
 
-2.  **Locate the Module ZIP:** After running the `./pack_modules.sh` script in the `kernel-build` directory, you will find a ZIP file named something like `sm7325-klm-1.1-20250815.zip`.
+---
 
-3.  **Transfer to Your Phone:** Copy this ZIP file to your phone's internal storage or SD card.
+## Bonus: A Note on Bypassing Advanced Integrity Checks
 
-4.  **Install via App:**
-    *   Open the **Magisk** or **KernelSU** application on your phone.
-    *   Navigate to the **Modules** section.
-    *   Tap the **Install from storage** button.
-    *   Find and select the module ZIP file you just copied.
+The kernel and helper module provide the foundation for hiding modifications. However, the most sophisticated detection methods may require additional community tools.
 
-5.  **Reboot:** Once the in-app installation is complete, reboot your device. The new kernel modules and any applicable fixes will now be active.
+After installing this kernel and the helper module, to bypass certain checks, the following tools may be required:
+
+*   **Play Integrity Fix (PIF):** This module is used to spoof the device's **unlocked bootloader** state by consistently changing properties like `sys.oem_unlock_allowed`.
+*   **TrickyStore:** This tool is used to bypass the **verified boot** check. It utilizes a **user-provided valid keybox** to help the device report a fully verified boot state. You must acquire a valid keybox on your own.
