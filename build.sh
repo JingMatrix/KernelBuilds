@@ -34,12 +34,13 @@ CLANG_URL="https://github.com/ravindu644/Android-Kernel-Tutorials/releases/downl
 # Define full paths to binaries
 AVBTOOL=$TOOLCHAINS_BASE_DIR/avb/avbtool.py
 MAGISKBOOT=$TOOLCHAINS_BASE_DIR/AIK_ARM/bin/magiskboot_x86
-VBMETA_PATCHER=$TOOLCHAINS_BASE_DIR/vbmeta-action-patcher/x86_64/vbmeta-disable-verification
 
 # --- Build Environment ---
 SRC_DIR=$MAIN_DIR/sm7325
 OUT_DIR=$MAIN_DIR/builds
 FIRMWARE_BASE_DIR=$MAIN_DIR/firmware
+SIGNING_KEY_PRIVATE=$OUT_DIR/signing_key.pem
+SIGNING_KEY_PUBLIC=$OUT_DIR/signing_key.avbpubkey
 JOBS=$(nproc)
 
 MAKE_PARAMS="-j$JOBS -C $SRC_DIR O=$SRC_DIR/out \
@@ -56,7 +57,7 @@ CHECK_DEPENDENCIES()
 	echo "Checking for required dependencies..."
 
 	# Check for system-wide tools
-	local system_tools=("git" "wget" "tar" "make" "ccache" "python3")
+	local system_tools=("git" "wget" "tar" "make" "ccache" "python3" "stat" "openssl")
 	for tool in "${system_tools[@]}"; do
 		if ! command -v "$tool" &> /dev/null; then
 			echo "ERROR: System tool '$tool' is not installed."
@@ -67,7 +68,7 @@ CHECK_DEPENDENCIES()
 	echo "All required system tools are installed."
 
 	# Check for toolchain-specific binaries
-	local toolchain_tools=("$AVBTOOL" "$MAGISKBOOT" "$VBMETA_PATCHER")
+	local toolchain_tools=("$AVBTOOL" "$MAGISKBOOT")
 	for tool_path in "${toolchain_tools[@]}"; do
 		if [ ! -f "$tool_path" ]; then
 			echo "ERROR: Required tool '$tool_path' not found."
@@ -77,7 +78,7 @@ CHECK_DEPENDENCIES()
 		fi
 	done
 	# Ensure binaries are executable
-	chmod +x "$MAGISKBOOT" "$VBMETA_PATCHER"
+	chmod +x "$MAGISKBOOT"
 	echo "All required toolchain binaries are present."
 }
 
@@ -98,6 +99,21 @@ PREPARE_CLANG()
 		echo "Clang toolchain downloaded and extracted."
 	else
 		echo "Clang toolchain already exists."
+	fi
+}
+
+PREPARE_SIGNING_KEY()
+{
+	echo "----------------------------------------------"
+	echo "Checking for signing key..."
+	mkdir -p "$OUT_DIR"
+	if [ ! -f "$SIGNING_KEY_PRIVATE" ]; then
+		echo "Signing key not found. Generating a new one..."
+		openssl genpkey -algorithm RSA -out "$SIGNING_KEY_PRIVATE" -pkeyopt rsa_keygen_bits:4096
+		openssl pkey -in "$SIGNING_KEY_PRIVATE" -pubout -out "$SIGNING_KEY_PUBLIC"
+		echo "New signing key pair generated in $OUT_DIR"
+	else
+		echo "Existing signing key found."
 	fi
 }
 
@@ -211,32 +227,99 @@ PACK_VENDOR_BOOT_IMG()
 	rm -rf "$TMP_DIR"
 }
 
-PATCH_VBMETA()
+# Function to manually rebuild vbmeta to spoof the hashes
+SPOOF_VBMETA_MANUAL()
 {
 	echo "----------------------------------------------"
-	echo "Patching vbmeta.img for $VARIANT..."
-	cp "$FIRMWARE_DIR/vbmeta.img" "$VARIANT_OUT_DIR/vbmeta.img"
-	"$VBMETA_PATCHER" "$VARIANT_OUT_DIR/vbmeta.img"
-	echo "vbmeta verification disabled for $VARIANT."
+	echo "Rebuilding vbmeta.img for $VARIANT using avbtool..."
+
+	# Step 1: Get metadata from the original vbmeta.img
+	local stock_vbmeta="$FIRMWARE_DIR/vbmeta.img"
+	local info
+	info=$(python3 "$AVBTOOL" info_image --image "$stock_vbmeta")
+
+	local algorithm
+	algorithm=$(echo "$info" | grep "Algorithm:" | head -n 1 | awk '{print $2}')
+	local rollback_index
+	rollback_index=$(echo "$info" | grep "Rollback Index:" | head -n 1 | awk '{print $3}')
+
+	if [ -z "$algorithm" ] || [ -z "$rollback_index" ]; then
+		echo "ERROR: Could not parse metadata from stock vbmeta.img for $VARIANT."
+		exit 1
+	fi
+	echo "Stock vbmeta metadata: Algorithm=$algorithm, Rollback Index=$rollback_index"
+
+	# Get partition sizes from stock firmware images
+	echo "Getting partition sizes from stock firmware images..."
+	local boot_partition_size
+	boot_partition_size=$(stat -c %s "$FIRMWARE_DIR/boot.img")
+	local dtbo_partition_size
+	dtbo_partition_size=$(stat -c %s "$FIRMWARE_DIR/dtbo.img")
+	local vendor_boot_partition_size
+	vendor_boot_partition_size=$(stat -c %s "$FIRMWARE_DIR/vendor_boot.img")
+
+	if [ -z "$boot_partition_size" ] || [ -z "$dtbo_partition_size" ] || [ -z "$vendor_boot_partition_size" ]; then
+		echo "ERROR: Could not determine partition size for one or more images in $FIRMWARE_DIR."
+		exit 1
+	fi
+	echo "Partition sizes: boot=${boot_partition_size}, dtbo=${dtbo_partition_size}, vendor_boot=${vendor_boot_partition_size}"
+
+	# Step 2: Add signed hash footers to our custom images with correct partition sizes.
+	echo "Adding signed hash footers to images..."
+	python3 "$AVBTOOL" add_hash_footer --image "$VARIANT_OUT_DIR/boot.img" --partition_name boot --partition_size "$boot_partition_size" --key "$SIGNING_KEY_PRIVATE" --algorithm "$algorithm"
+	python3 "$AVBTOOL" add_hash_footer --image "$VARIANT_OUT_DIR/dtbo.img" --partition_name dtbo --partition_size "$dtbo_partition_size" --key "$SIGNING_KEY_PRIVATE" --algorithm "$algorithm"
+	python3 "$AVBTOOL" add_hash_footer --image "$VARIANT_OUT_DIR/vendor_boot.img" --partition_name vendor_boot --partition_size "$vendor_boot_partition_size" --key "$SIGNING_KEY_PRIVATE" --algorithm "$algorithm"
+
+	# Step 3: Rebuild vbmeta by including descriptors from the footered images.
+	if python3 "$AVBTOOL" make_vbmeta_image \
+		--output "$VARIANT_OUT_DIR/vbmeta.img" \
+		--key "$SIGNING_KEY_PRIVATE" \
+		--algorithm "$algorithm" \
+		--rollback_index "$rollback_index" \
+		--flags 2 \
+		--include_descriptors_from_image "$VARIANT_OUT_DIR/boot.img" \
+		--include_descriptors_from_image "$VARIANT_OUT_DIR/dtbo.img" \
+		--include_descriptors_from_image "$VARIANT_OUT_DIR/vendor_boot.img"
+then
+	echo "Successfully rebuilt vbmeta.img. Final size: $(stat -c %s "$VARIANT_OUT_DIR/vbmeta.img") bytes."
+	cp "$SIGNING_KEY_PUBLIC" "$VARIANT_OUT_DIR/"
+	# --- NEW: Print the metadata of the generated vbmeta.img for verification ---
+	echo "----------------- Generated vbmeta.img Metadata -----------------"
+	python3 "$AVBTOOL" info_image --image "$VARIANT_OUT_DIR/vbmeta.img"
+	echo "-----------------------------------------------------------------"
+else
+	echo "ERROR: Failed to rebuild vbmeta.img manually for $VARIANT."
+	exit 1
+	fi
 }
 
 
 # --- Main Execution ---
 clear
 
-# 1. Setup and Preparation
-CHECK_DEPENDENCIES
-PREPARE_CLANG
-DETECT_BRANCH
-if [[ $1 == "-c" || $1 == "--clean" ]]; then
+# 1. Determine Build Mode
+BUILD_MODE="full"
+if [[ $1 == "vbmeta" ]]; then
+	BUILD_MODE="vbmeta_only"
+	echo "Build mode: vbmeta only. Skipping kernel compilation."
+elif [[ $1 == "-c" || $1 == "--clean" ]]; then
 	CLEAN_SOURCE
 fi
 
-# 2. Dynamic Build Loop based on firmware directories
+
+# 2. Setup and Preparation
+CHECK_DEPENDENCIES
+PREPARE_SIGNING_KEY
+if [ "$BUILD_MODE" == "full" ]; then
+	PREPARE_CLANG
+	DETECT_BRANCH
+fi
+
+# 3. Dynamic Build Loop based on firmware directories
 if [ ! -d "$FIRMWARE_BASE_DIR" ] || [ -z "$(ls -A "$FIRMWARE_BASE_DIR")" ]; then
-    echo "ERROR: 'firmware' directory does not exist or is empty."
-    echo "Please create subdirectories for each variant (e.g., firmware/a52sxqxx) with required images."
-    exit 1
+	echo "ERROR: 'firmware' directory does not exist or is empty."
+	echo "Please create subdirectories for each variant (e.g., firmware/a52sxqxx) with required images."
+	exit 1
 fi
 
 for variant_path in "$FIRMWARE_BASE_DIR"/*; do
@@ -250,12 +333,12 @@ for variant_path in "$FIRMWARE_BASE_DIR"/*; do
 		echo "Processing Variant: $VARIANT"
 		echo "=============================================="
 
-		# 3. Check for required firmware files
+		# 4. Check for required firmware files
 		REQUIRED_FILES=("boot.img" "vbmeta.img" "dtbo.img" "vendor_boot.img")
 		missing_file=false
 		for file in "${REQUIRED_FILES[@]}"; do
 			if [ ! -f "$FIRMWARE_DIR/$file" ]; then
-				echo "WARNING: Missing '$file' in '$FIRMWARE_DIR'. Skipping build for $VARIANT."
+				echo "WARNING: Missing firmware file '$file' for $VARIANT. Skipping."
 				missing_file=true
 				break
 			fi
@@ -267,7 +350,7 @@ for variant_path in "$FIRMWARE_BASE_DIR"/*; do
 		mkdir -p "$VARIANT_OUT_DIR"
 
 
-		# 4. Set variant-specific configurations
+		# 5. Set variant-specific configurations
 		case "$VARIANT" in
 			a52sxqxx)
 				DEFCONFIG=a52sxq_eur_open_defconfig
@@ -287,13 +370,31 @@ for variant_path in "$FIRMWARE_BASE_DIR"/*; do
 				;;
 		esac
 
-		# 5. Build and Pack
-		BUILD_KERNEL
-		BUILD_MODULES
-		PACK_BOOT_IMG
-		PACK_DTBO_IMG
-		PACK_VENDOR_BOOT_IMG
-		PATCH_VBMETA
+		# 6. Build and Pack OR Check for existing files
+		if [ "$BUILD_MODE" == "full" ]; then
+			BUILD_KERNEL
+			BUILD_MODULES
+			PACK_BOOT_IMG
+			PACK_DTBO_IMG
+			PACK_VENDOR_BOOT_IMG
+		else # vbmeta_only mode
+			PACKED_IMAGES=("$VARIANT_OUT_DIR/boot.img" "$VARIANT_OUT_DIR/dtbo.img" "$VARIANT_OUT_DIR/vendor_boot.img")
+			missing_packed_file=false
+			for file in "${PACKED_IMAGES[@]}"; do
+				if [ ! -f "$file" ]; then
+					echo "WARNING: Pre-built image '$file' not found for $VARIANT. Run a full build first. Skipping."
+					missing_packed_file=true
+					break
+				fi
+			done
+			if [ "$missing_packed_file" = true ]; then
+				continue
+			fi
+			echo "Found all pre-built images for $VARIANT."
+		fi
+
+		# 7. Generate vbmeta.img (runs in both modes)
+		SPOOF_VBMETA_MANUAL
 	fi
 done
 
