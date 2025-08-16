@@ -133,6 +133,10 @@ DETECT_BRANCH()
 		echo "AOSP Branch Detected..."
 		ASC_VARIANT="AOSP"
 		ASC_VAR="A"
+	elif [[ "$branch" == "dev-ksu" ]]; then
+		echo "DEV Branch Detected..."
+		ASC_VARIANT="DEV"
+		ASC_VAR="D"
 	else
 		echo "ERROR: Current branch '$branch' is not a valid build branch."
 		exit 1

@@ -6,4 +6,4 @@
 	url = https://github.com/sreejith7676/AIK_ARM.git
 [submodule "sm7325"]
 	path = sm7325
-	url = https://github.com/JingMatrix/kernel_samsung_ascendia_sm7325.git
+	url = https://github.com/JingMatrix/samsung_sm7325.git
