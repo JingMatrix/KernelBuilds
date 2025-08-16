@@ -1,185 +1,262 @@
 #!/bin/bash
 #
-# Magisk/KSU Systemless Module Packager
-# Coded by JingMatrix @2025
+# A script to pack kernel modules for sm7325
+# Copyright (C) 2025 JingMatrix
 #
-# This script packages compiled kernel modules and a helper script
-# into a clean, systemless "Kernel Helper" module.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 
-set -e
-
-# --- Module Configuration ---
-MODULE_ID="sm7325-kernel-helper"
-MODULE_NAME="Kernel Helper Pack for SM7325"
-MODULE_VERSION="2.1-$(date +%Y%m%d)"
+# --- Configuration ---
+MODULE_ID="sm7325-klm"
+MODULE_NAME="SM7325 Kernel Helper"
 MODULE_AUTHOR="JingMatrix"
-MODULE_DESC="Systemlessly installs kernel modules and spoofs boot properties to pass integrity checks."
+MODULE_VERSION="1.5"
+MODULE_VERSION_CODE=6
+DATE=$(date +%Y%m%d)
+ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}-${DATE}.zip"
+MAIN_DIR=$(pwd)
+BUILDS_DIR=$MAIN_DIR/builds
+MODULE_BUILD_DIR=$MAIN_DIR/module_tmp
 
-# --- Path Configuration ---
-# Assumes this script is in the main project dir and builds are in `builds`
-BUILDS_DIR="$(pwd)/builds"
-MODULE_WORK_DIR="$(pwd)/module_temp_work"
-# The script will look for this file in the current directory
-MODPROBE_SOURCE_SCRIPT="vendor_modprobe.sh"
+# --- Functions ---
 
-# --- Script Logic (DO NOT EDIT BELOW THIS LINE) ---
+cleanup() {
+    echo "Cleaning up temporary directory..."
+    rm -rf "$MODULE_BUILD_DIR"
+}
 
-echo "=============================================="
-echo "Systemless Module Packager"
-echo "=============================================="
+generate_module_prop() {
+    echo "Generating module.prop..."
+    cat > "$MODULE_BUILD_DIR/module.prop" <<- EOM
+id=${MODULE_ID}
+name=${MODULE_NAME}
+version=${MODULE_VERSION}
+versionCode=${MODULE_VERSION_CODE}
+author=${MODULE_AUTHOR}
+description=Systemless installer for custom kernel modules on sm7325 devices. Includes device-specific runtime fixes.
+EOM
+}
 
-# 1. Find the latest built variant to source modules and vbmeta from.
-if [ ! -d "$BUILDS_DIR" ] || [ -z "$(ls -A "$BUILDS_DIR")" ]; then
-    echo "ERROR: Output directory '$BUILDS_DIR' is empty or does not exist."
-    echo "Please run the main kernel build script first."
-    exit 1
+generate_updater_script() {
+    echo "Generating META-INF/com/google/android/updater-script..."
+    mkdir -p "$MODULE_BUILD_DIR/META-INF/com/google/android"
+    cat > "$MODULE_BUILD_DIR/META-INF/com/google/android/updater-script" <<- EOM
+# Stub updater-script
+# The real logic is in customize.sh
+EOM
+}
+
+generate_customize_sh() {
+    echo "Generating customize.sh with verbose camera fix logic..."
+    # Using <<- 'EOM' allows for indentation in the script for readability,
+    # and the quotes prevent variable expansion within this script.
+    cat > "$MODULE_BUILD_DIR/customize.sh" <<- 'EOM'
+#!/sbin/sh
+#
+# This script is executed by the Magisk/KernelSU app during module installation.
+# It applies a systemless camera fix for sm7325 devices that require it.
+#
+
+# Magisk/KernelSU provides these variables and functions
+# $MODPATH is the path to this module's directory
+# ui_print "message" prints a message to the installation log
+
+ui_print " "
+ui_print "- SM7325 Kernel Helper -"
+ui_print "  Installing kernel modules and applying fixes..."
+ui_print " "
+
+# --- Camera Fix Logic ---
+DEVICE_CODENAME=$(getprop ro.product.device)
+
+# Check if the device codename starts with "a52s"
+if [[ "$DEVICE_CODENAME" == "a52s"* ]]; then
+    ui_print "- Device identified as Galaxy A52s ($DEVICE_CODENAME)."
+    ui_print "- Checking camera libraries for required patches..."
+
+    PATCH_APPLIED=false
+
+    # Create the necessary directories inside the module's folder ($MODPATH)
+    # This is done once to avoid repetition.
+    mkdir -p "$MODPATH/system/vendor/lib/hw"
+    mkdir -p "$MODPATH/system/vendor/lib64/hw"
+
+    # --- Check and patch each library individually for clear user feedback ---
+
+    # 64-bit main library
+    if [ -f "/vendor/lib64/hw/camera.qcom.so" ]; then
+        if grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/camera.qcom.so; then
+            ui_print "  - Patching /vendor/lib64/hw/camera.qcom.so..."
+            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/camera.qcom.so" > "$MODPATH/system/vendor/lib64/hw/camera.qcom.so"
+            PATCH_APPLIED=true
+        else
+            ui_print "  - Skipping /vendor/lib64/hw/camera.qcom.so (no patch needed)."
+        fi
+    fi
+
+    # 64-bit override library
+    if [ -f "/vendor/lib64/hw/com.qti.chi.override.so" ]; then
+        if grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/com.qti.chi.override.so; then
+            ui_print "  - Patching /vendor/lib64/hw/com.qti.chi.override.so..."
+            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/com.qti.chi.override.so" > "$MODPATH/system/vendor/lib64/hw/com.qti.chi.override.so"
+            PATCH_APPLIED=true
+        else
+            ui_print "  - Skipping /vendor/lib64/hw/com.qti.chi.override.so (no patch needed)."
+        fi
+    fi
+
+    # 32-bit main library
+    if [ -f "/vendor/lib/hw/camera.qcom.so" ]; then
+        if grep -q 'ro.boot.flash.locked' /vendor/lib/hw/camera.qcom.so; then
+            ui_print "  - Patching /vendor/lib/hw/camera.qcom.so..."
+            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/camera.qcom.so" > "$MODPATH/system/vendor/lib/hw/camera.qcom.so"
+            PATCH_APPLIED=true
+        else
+            ui_print "  - Skipping /vendor/lib/hw/camera.qcom.so (no patch needed)."
+        fi
+    fi
+
+    # 32-bit override library
+    if [ -f "/vendor/lib/hw/com.qti.chi.override.so" ]; then
+        if grep -q 'ro.boot.flash.locked' /vendor/lib/hw/com.qti.chi.override.so; then
+            ui_print "  - Patching /vendor/lib/hw/com.qti.chi.override.so..."
+            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/com.qti.chi.override.so" > "$MODPATH/system/vendor/lib/hw/com.qti.chi.override.so"
+            PATCH_APPLIED=true
+        else
+            ui_print "  - Skipping /vendor/lib/hw/com.qti.chi.override.so (no patch needed)."
+        fi
+    fi
+
+    if $PATCH_APPLIED; then
+        ui_print "- Camera fix applied successfully."
+    else
+        ui_print "- Camera patch check complete. No patches were required."
+    fi
+else
+    ui_print "- Device ($DEVICE_CODENAME) does not require a camera fix. Skipping."
 fi
-LATEST_VARIANT_PATH=$(ls -td -- "$BUILDS_DIR"/*/ | head -n 1)
-SOURCE_MODULES_DIR="${LATEST_VARIANT_PATH}modules/vendor/lib/modules"
-SOURCE_VBMETA_PATH="${LATEST_VARIANT_PATH}vbmeta.img"
 
-if [ ! -d "$SOURCE_MODULES_DIR" ]; then
-    echo "ERROR: Could not find the 'modules' directory in: $LATEST_VARIANT_PATH"
-    exit 1
-fi
-echo "Found modules to package from: $(basename "$LATEST_VARIANT_PATH")"
+ui_print " "
+ui_print "- Installation complete."
+EOM
+}
 
-# 2. Dynamically calculate the vbmeta digest and size for spoofing.
-if [ ! -f "$SOURCE_VBMETA_PATH" ]; then
-    echo "ERROR: Could not find vbmeta.img in '$LATEST_VARIANT_PATH' to calculate digest."
-    exit 1
-fi
-VBMETA_DIGEST=$(sha256sum "$SOURCE_VBMETA_PATH" | awk '{print $1}')
-VBMETA_SIZE=$(stat -c %s "$SOURCE_VBMETA_PATH")
-
-if [ -z "$VBMETA_DIGEST" ] || [ -z "$VBMETA_SIZE" ]; then
-    echo "ERROR: Failed to calculate digest or size of vbmeta.img."
-    exit 1
-fi
-echo "Determined vbmeta digest for spoofing: ${VBMETA_DIGEST}"
-echo "Determined vbmeta size for spoofing: ${VBMETA_SIZE}"
-
-# 3. Clean up and create the working directory structure.
-MODULE_ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
-echo "Cleaning up previous build..."
-rm -rf "$MODULE_WORK_DIR"
-rm -f "$MODULE_ZIP_NAME"
-
-echo "Creating module structure..."
-MODULE_SYSTEM_DIR="$MODULE_WORK_DIR/system"
-mkdir -p "$MODULE_SYSTEM_DIR/vendor/lib/modules"
-mkdir -p "$MODULE_WORK_DIR/META-INF/com/google/android"
-
-# 4. Create the Magisk/KSU metadata files.
-
-# Create module.prop
-echo "Creating module.prop..."
-cat <<EOF > "$MODULE_WORK_DIR/module.prop"
-id=$MODULE_ID
-name=$MODULE_NAME
-version=$MODULE_VERSION
-versionCode=$(date +%Y%m%d)
-author=$MODULE_AUTHOR
-description=$MODULE_DESC
-reboot=true
-EOF
-
-# Create service.sh with our dynamically determined values.
-echo "Creating service.sh for property spoofing..."
-cat <<EOF > "$MODULE_WORK_DIR/service.sh"
+generate_service_sh() {
+    local calculated_digest="$1"
+    local calculated_size="$2"
+    echo "Generating service.sh for vbmeta spoofing with digest: ${calculated_digest} and size: ${calculated_size}"
+    mkdir -p "$MODULE_BUILD_DIR"
+    cat > "$MODULE_BUILD_DIR/service.sh" <<- EOM
 #!/system/bin/sh
-# This script is executed in post-fs-data mode by Magisk/KernelSU.
+#
+# This script is executed during the boot process by Magisk/KernelSU.
+# Its purpose is to add back the ro.boot.vbmeta.* properties that are
+# missing when booting with a vbmeta that has verification disabled.
+#
 
-# Wait a few seconds for the boot process to stabilize before setting properties.
-sleep 15
+# Wait for the boot process to be mostly complete
+until [ "\$(getprop sys.boot_completed)" = "1" ]; do
+    sleep 1
+done
 
-# Forcibly create missing boot properties using dynamically determined values
-# from the build script and other plausible reference values.
+# The digest and size of the custom vbmeta.img, calculated at build time.
+VBMETA_DIGEST="${calculated_digest}"
+VBMETA_SIZE="${calculated_size}"
+
+resetprop -p --delete ro.boot.vbmeta.avb_version
+resetprop -p --delete ro.boot.vbmeta.device_state
+resetprop -p --delete ro.boot.vbmeta.digest
+resetprop -p --delete ro.boot.vbmeta.hash_alg
+resetprop -p --delete ro.boot.vbmeta.size
+
 resetprop -n ro.boot.vbmeta.avb_version 1.0
 resetprop -n ro.boot.vbmeta.device_state locked
-resetprop -n ro.boot.vbmeta.digest ${VBMETA_DIGEST}
+resetprop -n ro.boot.vbmeta.digest "\$VBMETA_DIGEST"
 resetprop -n ro.boot.vbmeta.hash_alg sha256
-resetprop -n ro.boot.vbmeta.invalidate_on_error yes
-resetprop -n ro.boot.vbmeta.size ${VBMETA_SIZE}
-resetprop -n ro.boot.verifiedbootstate green
+resetprop -n ro.boot.vbmeta.size "\$VBMETA_SIZE"
+EOM
+}
 
-# Log that the script has run successfully.
-log -p i -t KernelHelper "Successfully spoofed boot properties."
-EOF
-chmod 755 "$MODULE_WORK_DIR/service.sh"
 
-# Create customize.sh with permission-setting logic.
-echo "Creating customize.sh..."
-cat <<'EOF' > "$MODULE_WORK_DIR/customize.sh"
-#!/system/bin/sh
-# This script is executed by the Magisk/KernelSU installer environment.
+# --- Main Script ---
+echo "Starting Kernel Module Packager..."
 
-# Abort installation if the user tries to flash this in recovery.
-if [ -z "$MODPATH" ]; then
-  ui_print "*********************************************************"
-  ui_print "! This is a Magisk/KernelSU module, not a recovery ZIP."
-  ui_print "! Please install it from the Magisk or KernelSU app."
-  ui_print "*********************************************************"
-  abort
+# Trap to ensure cleanup happens on exit
+trap cleanup EXIT
+
+# Clean previous build
+rm -f "$ZIP_NAME"
+cleanup
+mkdir -p "$MODULE_BUILD_DIR"
+
+# Generate module metadata
+generate_module_prop
+generate_updater_script
+generate_customize_sh
+generate_service_sh
+
+# Find the latest build directory
+LATEST_BUILD_DIR=$(find "$BUILDS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+
+if [ -z "$LATEST_BUILD_DIR" ]; then
+    echo "ERROR: Could not find any recent build directory in '$BUILDS_DIR'."
+    echo "Please run a full kernel build first using ./build.sh"
+    exit 1
 fi
 
-ui_print "*********************************************************"
-ui_print "*         Installing Kernel Helper Pack for SM7325      *"
-ui_print "*********************************************************"
-ui_print "- Setting permissions..."
+# Find the first vbmeta.img inside the latest build's variant folders
+VBMETA_PATH=$(find "$LATEST_BUILD_DIR" -name "vbmeta.img" | head -n 1)
 
-# Set permissions for the directory containing all the kernel modules
-set_perm_recursive $MODPATH/system/vendor/lib/modules 0 2000 0755 0644 u:object_r:vendor_file:s0
-ui_print "  - Kernel module permissions set."
+if [ -z "$VBMETA_PATH" ]; then
+    echo "ERROR: Could not find a 'vbmeta.img' in the latest build directory: $LATEST_BUILD_DIR"
+    echo "Please ensure the kernel build completed successfully."
+    exit 1
+fi
+echo "Found latest vbmeta.img at: $VBMETA_PATH"
 
-# Check for the vendor_modprobe.sh helper and set its permissions
-MODPROBE_HELPER=$MODPATH/system/vendor/bin/vendor_modprobe.sh
-if [ -f "$MODPROBE_HELPER" ]; then
-  set_perm $MODPROBE_HELPER 0 2000 0755 u:object_r:vendor_modinstall-sh_exec:s0
-  ui_print "  - vendor_modprobe.sh permissions set."
+# Calculate both digest and size of the vbmeta.img file
+CALCULATED_DIGEST=$(sha256sum "$VBMETA_PATH" | awk '{print $1}')
+CALCULATED_SIZE=$(stat -c %s "$VBMETA_PATH")
+
+if [ -z "$CALCULATED_DIGEST" ] || [ -z "$CALCULATED_SIZE" ]; then
+    echo "ERROR: Failed to calculate digest or size for $VBMETA_PATH"
+    exit 1
 fi
 
-ui_print "- Installation complete."
-EOF
+# Pass both calculated values to the service.sh generator
+generate_service_sh "$CALCULATED_DIGEST" "$CALCULATED_SIZE"
 
-# Create the standard, minimal META-INF scripts
-echo "Creating standard META-INF scripts..."
-cat <<EOF > "$MODULE_WORK_DIR/META-INF/com/google/android/updater-script"
-# Magisk/KSU stub
-EOF
-cat <<EOF > "$MODULE_WORK_DIR/META-INF/com/google/android/update-binary"
-#!/sbin/sh
-OUTFD=\$2
-ZIPFILE=\$3
-. /data/adb/magisk/util_functions.sh
-. \$ZIPFILE/customize.sh
-exit 0
-EOF
-chmod 755 "$MODULE_WORK_DIR/META-INF/com/google/android/update-binary"
+# Find the latest compiled modules
+MODULES_SOURCE_DIR="${LATEST_BUILD_DIR}/modules"
 
-# 5. Copy the kernel modules and helper script into the module structure.
-echo "Copying kernel modules..."
-cp -r "$SOURCE_MODULES_DIR"/* "$MODULE_SYSTEM_DIR/vendor/lib/modules/"
-
-if [ -f "$MODPROBE_SOURCE_SCRIPT" ]; then
-    echo "Copying vendor_modprobe.sh..."
-    mkdir -p "$MODULE_SYSTEM_DIR/vendor/bin"
-    cp "$MODPROBE_SOURCE_SCRIPT" "$MODULE_SYSTEM_DIR/vendor/bin/"
-else
-    echo "WARNING: vendor_modprobe.sh not found in current directory, skipping."
+if [ ! -d "$MODULES_SOURCE_DIR" ]; then
+    echo "ERROR: Could not find a 'modules' directory in '$LATEST_BUILD_DIR'."
+    exit 1
 fi
+echo "Found latest modules in: $LATEST_BUILD_DIR"
+echo "Copying modules to the package..."
 
-# 6. Package everything into a ZIP file.
-echo "Creating flashable ZIP: $MODULE_ZIP_NAME..."
-cd "$MODULE_WORK_DIR"
-zip -r9 "../$MODULE_ZIP_NAME" ./*
-cd ..
+# Copy module files into the correct structure for a systemless module
+mkdir -p "$MODULE_BUILD_DIR/system/vendor/lib"
+cp -r "$MODULES_SOURCE_DIR" "$MODULE_BUILD_DIR/system/vendor/lib/"
 
-# 7. Final cleanup.
-rm -rf "$MODULE_WORK_DIR"
+# Create the final ZIP archive
+echo "Creating ZIP file: $ZIP_NAME"
+cd "$MODULE_BUILD_DIR"
+zip -r9 "../$ZIP_NAME" ./*
+cd "$MAIN_DIR"
 
-echo "=============================================="
-echo "Successfully created systemless module:"
-echo "$MODULE_ZIP_NAME"
-echo "=============================================="
+echo "----------------------------------------------"
+echo "Module packaging complete!"
+echo "Flashable ZIP is available at: ${MAIN_DIR}/${ZIP_NAME}"
+echo "----------------------------------------------"
