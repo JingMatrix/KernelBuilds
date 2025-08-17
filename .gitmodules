@@ -7,3 +7,6 @@
 [submodule "sm7325"]
 	path = sm7325
 	url = https://github.com/JingMatrix/kernel_samsung_ascendia_sm7325.git
+[submodule "susfs4ksu"]
+	path = susfs4ksu
+	url = https://gitlab.com/simonpunk/susfs4ksu
