@@ -83,6 +83,8 @@ create_base_module_structure() {
     echo "Creating base module structure..."
     rm -rf "$MODULE_WORK_DIR"
     rm -f "$MODULE_ZIP_NAME"
+    # Create a 'files' dir for files we will mount manually
+    mkdir -p "$MODULE_WORK_DIR/files"
     mkdir -p "$MODULE_WORK_DIR/system"
     mkdir -p "$MODULE_WORK_DIR/META-INF/com/google/android"
     CUSTOMIZE_SH_PATH="$MODULE_WORK_DIR/customize.sh"
@@ -98,8 +100,8 @@ build_feature_klm_loading() {
 
     # --- Step 1: Copy module content ---
     echo "  -> Copying kernel modules..."
-    mkdir -p "$MODULE_WORK_DIR/system"
-    cp -a "$SOURCE_MODULES_DIR/vendor" "$MODULE_WORK_DIR/system/"
+    mkdir -p "$MODULE_WORK_DIR/system/vendor/lib/modules"
+    cp -a "$SOURCE_MODULES_DIR/vendor/lib/modules/." "$MODULE_WORK_DIR/system/vendor/lib/modules/"
 
     if [ -f "$MODPROBE_SOURCE_SCRIPT" ]; then
         echo "  -> Copying vendor_modprobe.sh..."
@@ -145,9 +147,9 @@ EOF
     chmod 755 "$MODULE_WORK_DIR/service.sh"
 }
 
-# Appends the A52s camera fix logic to the customize.sh script.
+# Appends the A52s camera fix logic (on-device patching) to the customize.sh script.
 build_feature_camera_fix() {
-    echo "Packaging Feature: A52s Camera Fix"
+    echo "Packaging Feature: A52s Camera Fix (On-Device Patching)"
 
     # --- Append the robust, verbose camera fix logic to customize.sh ---
     cat <<'EOF' >> "$CUSTOMIZE_SH_PATH"
@@ -156,77 +158,68 @@ ui_print "- Checking for A52s camera fix..."
 DEVICE_CODENAME=$(getprop ro.product.device)
 if [[ "$DEVICE_CODENAME" == "a52s"* ]]; then
     ui_print "  - Device identified as Galaxy A52s ($DEVICE_CODENAME)."
-    ui_print "  - Checking camera libraries for required patches..."
+    ui_print "  - Patching camera libraries into staging directory..."
 
     PATCH_APPLIED=false
+    # Create staging directories inside the module's 'files' path
+    mkdir -p "$MODPATH/files/vendor/lib/hw"
+    mkdir -p "$MODPATH/files/vendor/lib64/hw"
 
-    # Create the necessary directories once to avoid repetition.
-    mkdir -p "$MODPATH/system/vendor/lib/hw"
-    mkdir -p "$MODPATH/system/vendor/lib64/hw"
+    # --- Patch each library from the live system into the staging directory ---
 
-    set_perm_recursive $MODPATH/system/vendor/lib 0 2000 0755 0644 u:object_r:vendor_file:s0
-    set_perm_recursive $MODPATH/system/vendor/lib64 0 2000 0755 0644 u:object_r:vendor_file:s0
-    ui_print "  - Set base permissions for vendor/lib and vendor/lib64."
-    # --- Check, patch, and set permissions for each library individually ---
-
-    # 64-bit main library
-    if [ -f "/vendor/lib64/hw/camera.qcom.so" ]; then
-        if grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/camera.qcom.so; then
-            ui_print "    - Patching /vendor/lib64/hw/camera.qcom.so..."
-            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/camera.qcom.so" > "$MODPATH/system/vendor/lib64/hw/camera.qcom.so"
-            set_perm "$MODPATH/system/vendor/lib64/hw/camera.qcom.so" 0 0 0644 u:object_r:vendor_file:s0
-            PATCH_APPLIED=true
-        else
-            ui_print "    - Skipping /vendor/lib64/hw/camera.qcom.so (no patch needed)."
-        fi
+    if [ -f "/vendor/lib64/hw/camera.qcom.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/camera.qcom.so; then
+        sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/camera.qcom.so" > "$MODPATH/files/vendor/lib64/hw/camera.qcom.so"
+        PATCH_APPLIED=true
     fi
-
-    # 64-bit override library
-    if [ -f "/vendor/lib64/hw/com.qti.chi.override.so" ]; then
-        if grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/com.qti.chi.override.so; then
-            ui_print "    - Patching /vendor/lib64/hw/com.qti.chi.override.so..."
-            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/com.qti.chi.override.so" > "$MODPATH/system/vendor/lib64/hw/com.qti.chi.override.so"
-            set_perm "$MODPATH/system/vendor/lib64/hw/com.qti.chi.override.so" 0 0 0644 u:object_r:vendor_file:s0
-            PATCH_APPLIED=true
-        else
-            ui_print "    - Skipping /vendor/lib64/hw/com.qti.chi.override.so (no patch needed)."
-        fi
+    if [ -f "/vendor/lib64/hw/com.qti.chi.override.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/com.qti.chi.override.so; then
+        sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/com.qti.chi.override.so" > "$MODPATH/files/vendor/lib64/hw/com.qti.chi.override.so"
+        PATCH_APPLIED=true
     fi
-
-    # 32-bit main library
-    if [ -f "/vendor/lib/hw/camera.qcom.so" ]; then
-        if grep -q 'ro.boot.flash.locked' /vendor/lib/hw/camera.qcom.so; then
-            ui_print "    - Patching /vendor/lib/hw/camera.qcom.so..."
-            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/camera.qcom.so" > "$MODPATH/system/vendor/lib/hw/camera.qcom.so"
-            set_perm "$MODPATH/system/vendor/lib/hw/camera.qcom.so" 0 0 0644 u:object_r:vendor_file:s0
-            PATCH_APPLIED=true
-        else
-            ui_print "    - Skipping /vendor/lib/hw/camera.qcom.so (no patch needed)."
-        fi
+    if [ -f "/vendor/lib/hw/camera.qcom.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib/hw/camera.qcom.so; then
+        sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/camera.qcom.so" > "$MODPATH/files/vendor/lib/hw/camera.qcom.so"
+        PATCH_APPLIED=true
     fi
-
-    # 32-bit override library
-    if [ -f "/vendor/lib/hw/com.qti.chi.override.so" ]; then
-        if grep -q 'ro.boot.flash.locked' /vendor/lib/hw/com.qti.chi.override.so; then
-            ui_print "    - Patching /vendor/lib/hw/com.qti.chi.override.so..."
-            sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/com.qti.chi.override.so" > "$MODPATH/system/vendor/lib/hw/com.qti.chi.override.so"
-            set_perm "$MODPATH/system/vendor/lib/hw/com.qti.chi.override.so" 0 0 0644 u:object_r:vendor_file:s0
-            PATCH_APPLIED=true
-        else
-            ui_print "    - Skipping /vendor/lib/hw/com.qti.chi.override.so (no patch needed)."
-        fi
+    if [ -f "/vendor/lib/hw/com.qti.chi.override.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib/hw/com.qti.chi.override.so; then
+        sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/com.qti.chi.override.so" > "$MODPATH/files/vendor/lib/hw/com.qti.chi.override.so"
+        PATCH_APPLIED=true
     fi
 
     if $PATCH_APPLIED; then
-        ui_print "  - Camera fix and permissions applied successfully."
+        ui_print "  - Patching complete. Setting permissions for manual mount..."
+        # Set permissions on the files we just created so they are correct for bind mounting
+        set_perm_recursive $MODPATH/files/vendor 0 2000 0755 0644 u:object_r:vendor_file:s0
+        ui_print "  - Permissions set for staged camera libraries."
     else
-        ui_print "  - Camera patch check complete. No patches were required."
+        ui_print "  - Camera libraries did not require patching."
     fi
 else
     ui_print "  - Device is not an A52s, skipping fix."
 fi
 EOF
 }
+
+# Creates the boot script that will manually mount the camera files.
+build_boot_script_for_camera() {
+    echo "Packaging Feature: Boot Script for Camera Mount"
+    cat <<'EOF' > "$MODULE_WORK_DIR/post-fs-data.sh"
+#!/system/bin/sh
+MODDIR=${0%/*}
+
+# Robust function to mount a file only if the source exists.
+mount_file() {
+    if [ -f "$1" ]; then
+        mount -o bind "$1" "$2"
+    fi
+}
+
+mount_file "$MODDIR/files/vendor/lib64/hw/camera.qcom.so" "/system/vendor/lib64/hw/camera.qcom.so"
+mount_file "$MODDIR/files/vendor/lib64/hw/com.qti.chi.override.so" "/system/vendor/lib64/hw/com.qti.chi.override.so"
+mount_file "$MODDIR/files/vendor/lib/hw/camera.qcom.so" "/system/vendor/lib/hw/camera.qcom.so"
+mount_file "$MODDIR/files/vendor/lib/hw/com.qti.chi.override.so" "/system/vendor/lib/hw/com.qti.chi.override.so"
+EOF
+    chmod 755 "$MODULE_WORK_DIR/post-fs-data.sh"
+}
+
 
 # =============================================================================
 # === 3. MAIN EXECUTION
@@ -285,9 +278,9 @@ EOF
     # To disable a feature, simply comment out its respective line.
     build_feature_klm_loading
     build_feature_vbmeta_spoof
+    # The new camera fix is now a self-contained hybrid implementation
     build_feature_camera_fix
-
-    # touch $MODULE_WORK_DIR/skip_mount
+    build_boot_script_for_camera
 
     # Append a final footer to customize.sh
     echo 'ui_print "- Installation complete."' >> "$CUSTOMIZE_SH_PATH"
