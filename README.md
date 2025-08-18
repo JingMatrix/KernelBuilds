@@ -119,7 +119,8 @@ However, using `--flags 2` creates a new problem: the bootloader sees verificati
 The helper module serves two critical functions:
 
 1.  **Systemless Module Loading:** Its primary job is to package all the necessary kernel modules (`.ko` driver files) into a safe, systemless module. This means your `/vendor` partition is never modified.
-2.  **Runtime Property Injection:** The `service.sh` script within the helper module is specifically designed to fix the problem created by the bootable `vbmeta`. It runs at boot and uses `resetprop` to **add the missing `ro.boot.vbmeta.*` properties back into the system**. By providing these properties, it spoofs a clean, stock boot environment and provides the necessary foundation for passing integrity checks.
+2.  **A52s Camera Fix:** The module automatically detects if it is being installed on a Galaxy A52s and applies a systemless patch to the camera libraries. This fixes the common "camera crash" issue that occurs on devices with an unlocked bootloader.
+3.  **Runtime Property Injection:** The `service.sh` script within the helper module is specifically designed to fix the problem created by the bootable `vbmeta`. It runs at boot and uses `resetprop` to **add the missing `ro.boot.vbmeta.*` properties back into the system**. By providing these properties, it spoofs a clean, stock boot environment and provides the necessary foundation for passing integrity checks.
 
 ---
 
