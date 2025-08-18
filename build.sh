@@ -152,7 +152,7 @@ BUILD_KERNEL()
 	[ -d "$SRC_DIR/out" ] && echo "Starting $VARIANT kernel build... (DIRTY)" || echo "Starting $VARIANT kernel build..."
 	export LOCALVERSION="-$ANDROID_CODENAME-$RELEASE_VERSION-$ASC_VAR-$VARIANT"
 	mkdir -p "$SRC_DIR/out"
-	make $MAKE_PARAMS CC="ccache clang" "vendor/$DEFCONFIG"
+	make $MAKE_PARAMS CC="ccache clang" "vendor/$DEFCONFIG" custom.config
 	make $MAKE_PARAMS CC="ccache clang"
 }
 
