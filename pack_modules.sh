@@ -108,7 +108,7 @@ build_feature_klm_loading() {
         mkdir -p "$MODULE_WORK_DIR/system/vendor/bin"
         cp "$MODPROBE_SOURCE_SCRIPT" "$MODULE_WORK_DIR/system/vendor/bin/"
     else
-        echo "  -> WARNING: vendor_modprobe.sh not found, skipping."
+        echo "  -> DEBUG: vendor_modprobe.sh not found, skipping."
     fi
 
     # --- Step 2: Append installation logic to customize.sh ---
@@ -167,19 +167,19 @@ if [[ "$DEVICE_CODENAME" == "a52s"* ]]; then
 
     # --- Patch each library from the live system into the staging directory ---
 
-    if [ -f "/vendor/lib64/hw/camera.qcom.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/camera.qcom.so; then
+    if [ -f "/vendor/lib64/hw/camera.qcom.so" ]; then
         sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/camera.qcom.so" > "$MODPATH/files/vendor/lib64/hw/camera.qcom.so"
         PATCH_APPLIED=true
     fi
-    if [ -f "/vendor/lib64/hw/com.qti.chi.override.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib64/hw/com.qti.chi.override.so; then
+    if [ -f "/vendor/lib64/hw/com.qti.chi.override.so" ]; then
         sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib64/hw/com.qti.chi.override.so" > "$MODPATH/files/vendor/lib64/hw/com.qti.chi.override.so"
         PATCH_APPLIED=true
     fi
-    if [ -f "/vendor/lib/hw/camera.qcom.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib/hw/camera.qcom.so; then
+    if [ -f "/vendor/lib/hw/camera.qcom.so" ]; then
         sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/camera.qcom.so" > "$MODPATH/files/vendor/lib/hw/camera.qcom.so"
         PATCH_APPLIED=true
     fi
-    if [ -f "/vendor/lib/hw/com.qti.chi.override.so" ] && grep -q 'ro.boot.flash.locked' /vendor/lib/hw/com.qti.chi.override.so; then
+    if [ -f "/vendor/lib/hw/com.qti.chi.override.so" ]; then
         sed 's/ro.boot.flash.locked/ro.camera.notify_nfc/g' "/vendor/lib/hw/com.qti.chi.override.so" > "$MODPATH/files/vendor/lib/hw/com.qti.chi.override.so"
         PATCH_APPLIED=true
     fi
