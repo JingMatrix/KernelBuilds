@@ -128,7 +128,38 @@ The helper module serves two critical functions:
 
 The kernel and helper module provide the foundation for hiding modifications. However, the most sophisticated detection methods may require additional community tools.
 
-After installing this kernel and the helper module, to bypass certain checks, the following tools may be required:
+After installing this kernel and the helper module, to bypass certain checks, the following tools may be required. It is crucial to understand that there are two distinct layers of security checks an application can perform, each requiring a different tool to address.
 
-*   **Play Integrity Fix (PIF):** This module is used to spoof the device's **unlocked bootloader** state by consistently changing properties like `sys.oem_unlock_allowed`.
-*   **TrickyStore:** This tool is used to bypass the **verified boot** check. It utilizes a **user-provided valid keybox** to help the device report a fully verified boot state. You must acquire a valid keybox on your own.
+### 1. The Software Layer (Device Profile Checks)
+
+This layer includes checks where an application verifies the device's software profile by reading properties from the Android framework.
+
+*   **How the Check Works:** An application reads a collection of properties directly from standard Android classes like `android.os.Build`. To be convincing, these properties must be **coherent**—for example, the `Build.FINGERPRINT` must be consistent with the `Build.MODEL`, `Build.BRAND`, `Build.ID`, etc. An unlocked or custom ROM device will present an incoherent or non-certified profile.
+
+*   **Tool:** **[Play Integrity Fix](https://github.com/JingMatrix/PlayIntegratyFix)**
+*   **Primary Function:** Its core function is to spoof the device's software profile with a **complete and coherent set of properties** from a legitimate, certified device.
+*   **Mechanism:** It employs a two-stage approach to achieve this:
+    1.  **System-Wide Baseline Spoofing (via `resetprop`):** During the early boot process, the module performs a **system-wide** modification of common, low-level properties that indicate a rooted state (e.g., setting `ro.debuggable` to `0`, `ro.build.tags` to `release-keys`, and resetting vendor warranty flags). This establishes a clean "factory-like" foundation across the entire OS.
+    2.  **Targeted Profile Injection (via Zygisk):** The main, high-precision attack is reserved almost exclusively for the **Google Play Services process** (`com.google.android.gms.unstable`). It injects code that loads a full device profile from a JSON file and **directly modifies the static fields of the `android.os.Build` class within the GMS process's memory.** This spoofs the detailed device fingerprint only where it is most critically inspected.
+
+### 2. The Hardware Layer (Hardware-Backed Integrity Checks)
+
+This is the deepest level of security, where an application directly queries the secure hardware for a cryptographic proof of the device's boot integrity. This process has two phases: **local generation** and **chain verification**.
+
+**Phase A: The Local Generation (The Offline Check)**
+
+*   **How the Check Works:** An application, **entirely on the device and offline**, asks the secure hardware (TEE) to generate a **Key Attestation** certificate. This certificate is a cryptographic report containing the device's **true boot state** (e.g., `deviceLocked: false`). An offline detector app can read this report and immediately see the unlocked state.
+
+*   **Tool:** **[TrickyStoreOSS](https://github.com/beakthoven/TrickyStoreOSS)**
+*   **Mechanism:** **TrickyStore is essential for bypassing this local, offline check.** It intercepts the communication with the hardware and performs **cryptographic surgery** on the certificate *before* it is returned to the app. It replaces the true, unfavorable boot state data with a forged, "perfect" one. The local detector app is thus fooled because it receives a fraudulent report.
+
+**Phase B: The Chain Verification (The Online Check)**
+
+*   **How the Check Works:** After receiving the certificate, a security-conscious service (like Google Play) needs to confirm it wasn't forged. It does this by checking the signature on the certificate. It follows the chain of signatures up to a root authority. **Google's servers maintain a list of trusted hardware root authorities.**
+
+*   **Tool:** A valid **`keybox`** from a certified device.
+*   **Mechanism:** When TrickyStore forges the certificate in Phase A, it must re-sign it. It uses the private key from your user-provided `keybox` to do this. When Google's servers receive the certificate, they check its signature chain. If the `keybox` chain leads back to a root authority that is on their list of trusted hardware, the check passes. If the `keybox` is from an uncertified device or is self-signed, the chain verification will fail.
+
+**In Summary:**
+*   **TrickyStore** is what bypasses the **local detection** by forging the *content* of the attestation report. It is always required for hardware-level checks.
+*   A **valid `keybox`** is what bypasses the **online verification** by providing a trusted *signature* for the forged report. The offline/online distinction primarily affects whether the `keybox`'s signature chain can be authoritatively verified.
