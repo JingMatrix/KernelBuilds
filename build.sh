@@ -30,6 +30,8 @@ MAIN_DIR=$(pwd)
 TOOLCHAINS_BASE_DIR=$MAIN_DIR/toolchains
 CLANG_DIR=$TOOLCHAINS_BASE_DIR/clang
 CLANG_URL="https://github.com/ravindu644/Android-Kernel-Tutorials/releases/download/toolchains/clang-r383902b.tar.gz"
+# To be defined after SETUP_TOOLCHAIN
+MAKE_PARAMS=""
 
 # Define full paths to binaries
 AVBTOOL=$TOOLCHAINS_BASE_DIR/avb/avbtool.py
@@ -43,12 +45,6 @@ SIGNING_KEY_PRIVATE=$OUT_DIR/signing_key.pem
 SIGNING_KEY_PUBLIC=$OUT_DIR/signing_key.avbpubkey
 JOBS=$(nproc)
 
-MAKE_PARAMS="-j$JOBS -C $SRC_DIR O=$SRC_DIR/out \
-	ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
-	CROSS_COMPILE=$CLANG_DIR/bin/llvm-"
-
-export PATH="$CLANG_DIR/bin:$PATH"
-
 # --- Core Functions ---
 
 CHECK_DEPENDENCIES()
@@ -57,7 +53,7 @@ CHECK_DEPENDENCIES()
 	echo "Checking for required dependencies..."
 
 	# Check for system-wide tools
-	local system_tools=("git" "wget" "tar" "make" "ccache" "python3" "stat" "openssl")
+	local system_tools=("git" "wget" "tar" "make" "ccache" "python3" "stat" "openssl" "bear")
 	for tool in "${system_tools[@]}"; do
 		if ! command -v "$tool" &> /dev/null; then
 			echo "ERROR: System tool '$tool' is not installed."
@@ -82,23 +78,59 @@ CHECK_DEPENDENCIES()
 	echo "All required toolchain binaries are present."
 }
 
-PREPARE_CLANG()
+SETUP_TOOLCHAIN()
 {
 	echo "----------------------------------------------"
-	echo "Preparing Clang toolchain..."
-	if [ ! -d "$CLANG_DIR" ]; then
-		echo "Clang toolchain not found. Downloading..."
-		# Create the final destination directory first
+	echo "INFO: Attempting to locate local NDK toolchain..."
+
+	# 1. Attempt to find a local NDK Clang toolchain
+	if [ -n "$ANDROID_HOME" ] && [ -d "$ANDROID_HOME/ndk" ]; then
+		# Find the latest NDK version directory
+		LATEST_NDK_VERSION_DIR=$(ls "$ANDROID_HOME/ndk" | sort -V | tail -n 1)
+		if [ -n "$LATEST_NDK_VERSION_DIR" ]; then
+			POTENTIAL_CLANG_DIR="$ANDROID_HOME/ndk/$LATEST_NDK_VERSION_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+
+			# The crucial check: does the clang binary actually exist?
+			if [ -f "$POTENTIAL_CLANG_DIR/bin/clang" ]; then
+				echo "INFO: Found valid Clang in local NDK: $POTENTIAL_CLANG_DIR"
+				CLANG_DIR=$POTENTIAL_CLANG_DIR
+				# If we succeed, we are done and can exit the function.
+				return 0
+			fi
+		fi
+	fi
+
+	# 2. If local NDK fails, fall back to asking the user for download permission
+	echo "WARNING: Could not find a usable Clang toolchain in your local Android NDK."
+	echo "         Reason: \$ANDROID_HOME may not be set, NDK not installed, or toolchain is incomplete."
+
+	# Check if the download destination already exists
+	if [ -d "$CLANG_DIR" ] && [ -f "$CLANG_DIR/bin/clang" ]; then
+		echo "INFO: Using previously downloaded toolchain at '$CLANG_DIR'."
+		return 0
+	fi
+
+	# Prompt the user for permission
+	read -p "Do you want to download the recommended remote toolchain? [y/N] " -r REPLY
+	echo # Add a newline for cleaner output
+
+	if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+		echo "INFO: User approved download. Preparing to download Clang..."
+		mkdir -p "$(dirname "$CLANG_DIR")"
+		wget -q --show-progress -O clang.tar.gz "$CLANG_URL"
+
+		# Create the final destination directory
 		mkdir -p "$CLANG_DIR"
-		# Download the tarball
-		wget -q -O clang.tar.gz "$CLANG_URL"
-		# Extract its contents directly into the destination directory
-		tar -xf clang.tar.gz -C "$CLANG_DIR"
+
+		# Extract contents, stripping the top-level directory for a cleaner path
+		tar -xf clang.tar.gz -C "$CLANG_DIR" --strip-components=1
+
 		# Clean up the downloaded tarball
 		rm clang.tar.gz
-		echo "Clang toolchain downloaded and extracted."
+		echo "INFO: Clang toolchain downloaded and extracted successfully to '$CLANG_DIR'."
 	else
-		echo "Clang toolchain already exists."
+		echo "ERROR: Toolchain setup aborted by user."
+		exit 1
 	fi
 }
 
@@ -152,15 +184,15 @@ BUILD_KERNEL()
 	[ -d "$SRC_DIR/out" ] && echo "Starting $VARIANT kernel build... (DIRTY)" || echo "Starting $VARIANT kernel build..."
 	export LOCALVERSION="-$ANDROID_CODENAME-$RELEASE_VERSION-$ASC_VAR-$VARIANT"
 	mkdir -p "$SRC_DIR/out"
-	make $MAKE_PARAMS CC="ccache clang" "vendor/$DEFCONFIG" custom.config
-	make $MAKE_PARAMS CC="ccache clang"
+	bear -- make $MAKE_PARAMS CC="ccache clang" "vendor/$DEFCONFIG" custom.config
+	bear -- make $MAKE_PARAMS CC="ccache clang"
 }
 
 BUILD_MODULES()
 {
 	echo "----------------------------------------------"
 	echo "Building kernel modules for $VARIANT..."
-	make $MAKE_PARAMS INSTALL_MOD_PATH=modules INSTALL_MOD_STRIP=1 modules_install
+	bear -- make $MAKE_PARAMS INSTALL_MOD_PATH=modules INSTALL_MOD_STRIP=1 modules_install
 
 	local MODULES_OUT_DIR="$VARIANT_OUT_DIR/modules/vendor/lib/modules"
 	mkdir -p "$MODULES_OUT_DIR"
@@ -311,9 +343,15 @@ fi
 CHECK_DEPENDENCIES
 PREPARE_SIGNING_KEY
 if [ "$BUILD_MODE" == "full" ]; then
-	PREPARE_CLANG
+	SETUP_TOOLCHAIN
 	DETECT_BRANCH
 fi
+
+MAKE_PARAMS="-j$JOBS -C $SRC_DIR O=$SRC_DIR/out \
+	ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+	CROSS_COMPILE=$CLANG_DIR/bin/llvm-"
+
+export PATH="$CLANG_DIR/bin:$PATH"
 
 # 3. Dynamic Build Loop based on firmware directories
 if [ ! -d "$FIRMWARE_BASE_DIR" ] || [ -z "$(ls -A "$FIRMWARE_BASE_DIR")" ]; then

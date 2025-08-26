@@ -1,5 +1,7 @@
 toolchains/clang
 clang.tar.gz
 firmware
+compile_commands.json
+compile_commands.events.json
 builds
 sm7325-*
