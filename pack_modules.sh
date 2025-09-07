@@ -85,7 +85,6 @@ create_base_module_structure() {
     rm -f "$MODULE_ZIP_NAME"
     # Create a 'files' dir for files we will mount manually
     mkdir -p "$MODULE_WORK_DIR/files"
-    mkdir -p "$MODULE_WORK_DIR/system"
     mkdir -p "$MODULE_WORK_DIR/META-INF/com/google/android"
     CUSTOMIZE_SH_PATH="$MODULE_WORK_DIR/customize.sh"
 }
@@ -276,7 +275,7 @@ EOF
     # --- Feature Packaging Phase ---
     # Call the core feature functions to populate the module.
     # To disable a feature, simply comment out its respective line.
-    build_feature_klm_loading
+    # build_feature_klm_loading
     build_feature_vbmeta_spoof
     # The new camera fix is now a self-contained hybrid implementation
     build_feature_camera_fix
