@@ -150,16 +150,16 @@ This is the deepest level of security, where an application directly queries the
 
 *   **How the Check Works:** An application, **entirely on the device and offline**, asks the secure hardware (TEE) to generate a **Key Attestation** certificate. This certificate is a cryptographic report containing the device's **true boot state** (e.g., `deviceLocked: false`). An offline detector app can read this report and immediately see the unlocked state.
 
-*   **Tool:** **[TrickyStoreOSS](https://github.com/beakthoven/TrickyStoreOSS)**
-*   **Mechanism:** **TrickyStore is essential for bypassing this local, offline check.** It intercepts the communication with the hardware and performs **cryptographic surgery** on the certificate *before* it is returned to the app. It replaces the true, unfavorable boot state data with a forged, "perfect" one. The local detector app is thus fooled because it receives a fraudulent report.
+*   **Tool:** **[TEESimulator](https://github.com/JingMatrix/TEESimulator)**
+*   **Mechanism:** **TEESimulator is essential for bypassing this local, offline check.** It intercepts the communication with the hardware and performs **cryptographic surgery** on the certificate *before* it is returned to the app. It replaces the true, unfavorable boot state data with a forged, "perfect" one. The local detector app is thus fooled because it receives a fraudulent report.
 
 **Phase B: The Chain Verification (The Online Check)**
 
 *   **How the Check Works:** After receiving the certificate, a security-conscious service (like Google Play) needs to confirm it wasn't forged. It does this by checking the signature on the certificate. It follows the chain of signatures up to a root authority. **Google's servers maintain a list of trusted hardware root authorities.**
 
 *   **Tool:** A valid **`keybox`** from a certified device.
-*   **Mechanism:** When TrickyStore forges the certificate in Phase A, it must re-sign it. It uses the private key from your user-provided `keybox` to do this. When Google's servers receive the certificate, they check its signature chain. If the `keybox` chain leads back to a root authority that is on their list of trusted hardware, the check passes. If the `keybox` is from an uncertified device or is self-signed, the chain verification will fail.
+*   **Mechanism:** When TEESimulator forges the certificate in Phase A, it must re-sign it. It uses the private key from your user-provided `keybox` to do this. When Google's servers receive the certificate, they check its signature chain. If the `keybox` chain leads back to a root authority that is on their list of trusted hardware, the check passes. If the `keybox` is from an uncertified device or is self-signed, the chain verification will fail.
 
 **In Summary:**
-*   **TrickyStore** is what bypasses the **local detection** by forging the *content* of the attestation report. It is always required for hardware-level checks.
+*   **TEESimulator** is what bypasses the **local detection** by forging the *content* of the attestation report. It is always required for hardware-level checks.
 *   A **valid `keybox`** is what bypasses the **online verification** by providing a trusted *signature* for the forged report. The offline/online distinction primarily affects whether the `keybox`'s signature chain can be authoritatively verified.
